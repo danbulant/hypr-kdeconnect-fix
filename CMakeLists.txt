@@ -193,6 +193,31 @@ if(BUILD_TESTING)
   hkcf_apply_target_defaults(deskflow-input-test)
   add_test(NAME deskflow-input-test COMMAND deskflow-input-test)
 
+  pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.20)
+  set(TEST_SERVER_HEADERS)
+  foreach(PROTOCOL_NAME virtual-keyboard-unstable-v1 wlr-virtual-pointer-unstable-v1)
+    set(SERVER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/protocols/${PROTOCOL_NAME}-server-protocol.h)
+    add_custom_command(OUTPUT ${SERVER_HEADER}
+      COMMAND ${WAYLAND_SCANNER_EXECUTABLE} server-header
+        ${CMAKE_CURRENT_SOURCE_DIR}/protocols/${PROTOCOL_NAME}.xml ${SERVER_HEADER}
+      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/protocols/${PROTOCOL_NAME}.xml
+      VERBATIM
+    )
+    list(APPEND TEST_SERVER_HEADERS ${SERVER_HEADER})
+  endforeach()
+  add_executable(wayland-keysym-test
+    tests/wayland_keysym_test.cpp src/wayland_input.cpp src/key_resolver.cpp
+    ${PROTOCOL_SOURCES} ${TEST_SERVER_HEADERS}
+  )
+  target_include_directories(wayland-keysym-test PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/protocols)
+  target_link_libraries(wayland-keysym-test PRIVATE Qt6::Core PkgConfig::WAYLAND_CLIENT
+    PkgConfig::WAYLAND_SERVER PkgConfig::XKBCOMMON Threads::Threads)
+  hkcf_apply_target_defaults(wayland-keysym-test)
+  add_test(NAME wayland-keysym-test
+    COMMAND ${CMAKE_COMMAND} -E env --unset=WAYLAND_DISPLAY --unset=WAYLAND_SOCKET --unset=DISPLAY
+      $<TARGET_FILE:wayland-keysym-test>)
+  set_tests_properties(wayland-keysym-test PROPERTIES TIMEOUT 15)
+
   find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session REQUIRED)
   add_executable(portal-session-test
     tests/portal_session_test.cpp

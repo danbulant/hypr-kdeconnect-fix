@@ -400,7 +400,7 @@ bool WaylandInput::keyboardKeysym(std::uint32_t keysym, bool pressed) {
     }
 
     if (pressed) {
-        const bool shouldPressShift = resolved->needsShift && m_shiftedKeysDown == 0;
+        const bool shouldPressShift = resolved->needsShift && m_shiftedKeysyms.isEmpty();
         if (shouldPressShift && !keyboardKeycode(KEY_LEFTSHIFT, true))
             return false;
         if (!keyboardKeycode(resolved->evdevKeycode, true)) {
@@ -408,27 +408,15 @@ bool WaylandInput::keyboardKeysym(std::uint32_t keysym, bool pressed) {
                 keyboardKeycode(KEY_LEFTSHIFT, false);
             return false;
         }
-        if (resolved->needsShift) {
-            ++m_shiftedKeysDown;
-            m_keysymShiftCounts.insert(keysym, m_keysymShiftCounts.value(keysym) + 1);
-        }
+        if (resolved->needsShift)
+            m_shiftedKeysyms.insert(keysym);
         return true;
     }
 
     const bool ok = keyboardKeycode(resolved->evdevKeycode, false);
     bool shiftOk = true;
-    auto shifted = m_keysymShiftCounts.find(keysym);
-    if (shifted != m_keysymShiftCounts.end()) {
-        --m_shiftedKeysDown;
-        if (*shifted <= 1)
-            m_keysymShiftCounts.erase(shifted);
-        else
-            --(*shifted);
-        if (m_shiftedKeysDown <= 0) {
-            m_shiftedKeysDown = 0;
-            shiftOk = keyboardKeycode(KEY_LEFTSHIFT, false);
-        }
-    }
+    if (m_shiftedKeysyms.remove(keysym) && m_shiftedKeysyms.isEmpty())
+        shiftOk = keyboardKeycode(KEY_LEFTSHIFT, false);
     return ok && shiftOk;
 }
 

@@ -6,7 +6,7 @@
 #include <optional>
 
 #include <QElapsedTimer>
-#include <QHash>
+#include <QSet>
 #include <QRect>
 #include <QString>
 
@@ -90,8 +90,7 @@ class WaylandInput {
     QElapsedTimer m_timer;
     QString m_lastError;
     KeyResolver m_keyResolver;
-    QHash<std::uint32_t, int> m_keysymShiftCounts;
-    int m_shiftedKeysDown = 0;
+    QSet<std::uint32_t> m_shiftedKeysyms;
     xkb_state* m_xkbState = nullptr;
     std::uint32_t m_lastDepressed = ~0u;
     std::uint32_t m_lastLatched = ~0u;
