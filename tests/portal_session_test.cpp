@@ -1,5 +1,6 @@
 // Real portal and EIS bridge on a private bus, with a recording Wayland sink.
 #include "portal_backend.hpp"
+#include "security_policy.hpp"
 
 #include <QCoreApplication>
 #include <QDBusPendingCallWatcher>
@@ -261,6 +262,37 @@ void testNotifyOwnership(Portal& portal) {
     check(keys.isEmpty(), "Notify Close releases synthesized Shift");
 }
 
+void testRateLimitReleases(Portal& portal) {
+    const auto path = portal.create();
+    const auto notify = [&](const QString& method, int code, uint32_t state) {
+        return portal.notify(path, method, {code, state});
+    };
+    const auto accepted = [](const QDBusMessage& reply) {
+        check(reply.type() != QDBusMessage::ErrorMessage, "release must bypass saturated rate limit");
+    };
+    accepted(notify("NotifyKeyboardKeycode", KEY_LEFTCTRL, 1));
+    accepted(notify("NotifyKeyboardKeysym", 'A', 1));
+    accepted(notify("NotifyPointerButton", BTN_LEFT, 1));
+    QElapsedTimer timer;
+    timer.start();
+    for (int i = 0; i < hkcf::security::kMaxNotifyEventsPerWindow; ++i) {
+        auto message = QDBusMessage::createMethodCall(service, desktop, remote, "NotifyPointerMotion");
+        message.setArguments({QVariant::fromValue(QDBusObjectPath(path)), QVariantMap{}, 0.0, 0.0});
+        portal.frontend.asyncCall(message, 3000);
+    }
+    const auto limited = portal.notify(path, "NotifyPointerMotion", {0.0, 0.0});
+    check(limited.errorName() == "org.freedesktop.DBus.Error.LimitsExceeded", "motion saturates rate limit");
+    accepted(notify("NotifyKeyboardKeycode", KEY_LEFTCTRL, 0));
+    accepted(notify("NotifyKeyboardKeysym", 'A', 0));
+    accepted(notify("NotifyPointerButton", BTN_LEFT, 0));
+    check(keys.isEmpty() && buttons.isEmpty(), "all releases clear held state while rate limited");
+    check(notify("NotifyPointerButton", -1, 0).type() == QDBusMessage::ErrorMessage, "release bypass still validates input");
+    check(portal.notify(path, "NotifyPointerMotion", {0.0, 0.0}).errorName() == "org.freedesktop.DBus.Error.LimitsExceeded",
+          "releases do not reopen motion budget");
+    check(timer.elapsed() < hkcf::security::kNotifyRateWindowMs, "saturation test stays inside rate window");
+    portal.close(path);
+}
+
 void testDeviceGrants(Portal& portal) {
     for (uint32_t types : {1u, 2u}) {
         const auto path = portal.create(types);
@@ -322,6 +354,7 @@ int main(int argc, char** argv) {
         Portal portal;
         testRevocation(portal);
         testNotifyOwnership(portal);
+        testRateLimitReleases(portal);
         testDeviceGrants(portal);
         testOwnerLoss(portal);
         std::cout << "Portal session EIS lifetime tests passed\n";

@@ -494,9 +494,6 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
         connection.send(error(message, QDBusError::AccessDenied, QStringLiteral("session belongs to another D-Bus caller")));
         return true;
     }
-    if (!checkNotifyRate(message, connection, *session))
-        return true;
-
     if (member == QStringLiteral("NotifyPointerMotion")) {
         if (args.size() != 4 || !typedArg<QVariantMap>(args, 1) || !hasDevice(*session, kPointer)) {
             connection.send(error(message, QDBusError::AccessDenied, QStringLiteral("pointer device was not selected")));
@@ -508,6 +505,8 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid pointer motion delta")));
             return true;
         }
+        if (!checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_input.pointerMotion(*dx, *dy));
     }
 
@@ -522,6 +521,8 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid absolute pointer coordinates")));
             return true;
         }
+        if (!checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_input.pointerMotionAbsolute(*x, *y));
     }
 
@@ -537,6 +538,9 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid pointer button or state")));
             return true;
         }
+        // Releases are validated above but never consume the motion/press budget.
+        if (*state != 0 && !checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_inputs.pointerButton(session->inputOwner.data(), buttonCode, security::stateToPressed(*state)));
     }
 
@@ -551,6 +555,8 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid pointer axis delta")));
             return true;
         }
+        if (!checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_input.pointerAxis(*dx, *dy));
     }
 
@@ -565,6 +571,8 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid discrete axis")));
             return true;
         }
+        if (!checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_input.pointerAxisDiscrete(*axis, *steps));
     }
 
@@ -580,6 +588,9 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid keyboard keycode or state")));
             return true;
         }
+        // Releases are validated above but never consume the motion/press budget.
+        if (*state != 0 && !checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_inputs.keyboardKeycode(session->inputOwner.data(), keycodeValue, security::stateToPressed(*state)));
     }
 
@@ -595,6 +606,9 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid keyboard keysym or state")));
             return true;
         }
+        // Releases are validated above but never consume the motion/press budget.
+        if (*state != 0 && !checkNotifyRate(message, connection, *session))
+            return true;
         return sendInputResult(message, connection, m_inputs.keyboardKeysym(session->inputOwner.data(), keysymValue, security::stateToPressed(*state)));
     }
 
@@ -764,9 +778,10 @@ bool PortalBackend::checkNotifyRate(const QDBusMessage& message, const QDBusConn
         session.eventsInRateWindow = 0;
     }
 
-    ++session.eventsInRateWindow;
-    if (session.eventsInRateWindow <= security::kMaxNotifyEventsPerWindow)
+    if (session.eventsInRateWindow < security::kMaxNotifyEventsPerWindow) {
+        ++session.eventsInRateWindow;
         return true;
+    }
 
     connection.send(error(message, QDBusError::LimitsExceeded, QStringLiteral("too many input events")));
     return false;
