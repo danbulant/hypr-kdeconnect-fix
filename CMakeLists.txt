@@ -95,7 +95,7 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core DBus)
 
 pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client>=1.20)
 pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon>=1.5)
-pkg_check_modules(LIBEIS REQUIRED IMPORTED_TARGET libeis-1.0>=1.6)
+include(cmake/Libei.cmake)
 
 find_program(WAYLAND_SCANNER_EXECUTABLE wayland-scanner REQUIRED)
 
@@ -141,7 +141,7 @@ target_include_directories(hypr-kdeconnect-portal PRIVATE
 target_link_libraries(hypr-kdeconnect-portal PRIVATE
   Qt6::Core
   Qt6::DBus
-  PkgConfig::LIBEIS
+  hkcf-libeis
   PkgConfig::WAYLAND_CLIENT
   PkgConfig::XKBCOMMON
 )
@@ -177,7 +177,6 @@ if(BUILD_TESTING)
   hkcf_apply_target_defaults(security-policy-test)
   add_test(NAME security-policy-test COMMAND security-policy-test)
 
-  pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0>=1.6)
   add_executable(deskflow-input-test
     tests/deskflow_input_test.cpp
     src/eis_input_bridge.cpp
@@ -186,8 +185,8 @@ if(BUILD_TESTING)
   target_include_directories(deskflow-input-test PRIVATE src)
   target_link_libraries(deskflow-input-test PRIVATE
     Qt6::Core
-    PkgConfig::LIBEIS
-    PkgConfig::LIBEI
+    hkcf-libeis
+    hkcf-libei
     PkgConfig::XKBCOMMON
     PkgConfig::WAYLAND_CLIENT
   )

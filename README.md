@@ -53,15 +53,16 @@ Build-time:
 - `wayland-client` 1.20+
 - `wayland-scanner`
 - `xkbcommon` 1.5+
-- `libeis` 1.6+
-- `libei` 1.6+ when building tests (the default)
+- system `libeis` 1.6+ and, when building tests, `libei` 1.6+ (optional)
+- when suitable system libraries are unavailable: Meson 0.57+, Ninja, Python 3,
+  and the Python `jinja2` module to build the bundled libei 1.6.0 submodule
 
 Runtime:
 
 - a Wayland compositor exposing `zwlr_virtual_pointer_manager_v1`
 - a Wayland compositor exposing `zwp_virtual_keyboard_manager_v1`
 - `xdg-desktop-portal`
-- `libeis`
+- `libeis` when using the system-library build
 - KDE Connect or Deskflow
 
 On Arch-like systems the useful package set is roughly:
@@ -76,12 +77,37 @@ AUR package.
 
 ## Build
 
+Clone with submodules, or initialize them in an existing checkout:
+
+```sh
+git clone --recurse-submodules https://github.com/gfhdhytghd/hypr-kdeconnect-fix.git
+cd hypr-kdeconnect-fix
+# For an existing checkout:
+git submodule update --init --recursive
+```
+
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local"
 cmake --build build -j"$(nproc)"
 ctest --test-dir build --output-on-failure
 cmake --install build
 ```
+
+CMake prefers system libeis/libei 1.6+. If a required library is missing or too
+old, it builds the pinned `third_party/libei` submodule with Meson and links it
+statically. The bundled build does not install or replace system libraries and
+does not require libsystemd/libelogind; upstream tools, documentation and tests
+are not built. Our own tests remain enabled by default.
+
+On Debian/Devuan, the additional bundled-build tools can be installed with:
+
+```sh
+sudo apt install meson ninja-build python3-jinja2
+```
+
+To force the bundled build even when suitable system libraries exist, add
+`-DHKCF_USE_BUNDLED_LIBEI=ON` to the CMake configure command. After changing this
+option or `BUILD_TESTING`, use a fresh build directory.
 
 This installs:
 
