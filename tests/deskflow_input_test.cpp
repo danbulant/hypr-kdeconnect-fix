@@ -15,6 +15,7 @@
 namespace {
 QVector<QPair<uint32_t, int>> scrolls;
 QSet<uint32_t> keys;
+QVector<QPair<uint32_t, bool>> keyEvents;
 QSet<uint32_t> buttons;
 double absoluteX = -1, absoluteY = -1;
 void check(bool value, const char* message) {
@@ -36,6 +37,7 @@ bool WaylandInput::pointerButton(uint32_t button, bool pressed) {
 }
 bool WaylandInput::pointerAxisDiscrete(uint32_t axis, int steps) { scrolls.append({axis, steps}); return true; }
 bool WaylandInput::keyboardKeycode(uint32_t key, bool pressed, bool) {
+    keyEvents.append({key, pressed});
     if (pressed) keys.insert(key); else keys.remove(key);
     return true;
 }
@@ -134,6 +136,24 @@ void testEis() {
         ei_device_frame(absolute, ei_now(client));
         waitFor([&] { return absoluteX == barrierX; }, "input barrier");
     };
+    // Compare with eis-repeat-test's direct libei/libeis control. Repeats use
+    // separate frames; libeis filters duplicate states before the bridge sees them.
+    keyEvents.clear();
+    for (bool pressed : {true, true, true, false}) {
+        ei_device_keyboard_key(keyboard, KEY_A, pressed);
+        ei_device_frame(keyboard, ei_now(client));
+    }
+    sync();
+    check(keyEvents == QVector<QPair<uint32_t, bool>>{{KEY_A, true}, {KEY_A, false}}, "repeat sequence matches bare libeis");
+    keyEvents.clear();
+    for (int i = 0; i < 3; ++i) {
+        for (bool pressed : {true, false}) {
+            ei_device_keyboard_key(keyboard, KEY_A, pressed);
+            ei_device_frame(keyboard, ei_now(client));
+        }
+    }
+    sync();
+    check(keyEvents.size() == 6 && keys.isEmpty(), "balanced EIS repeat pairs are preserved");
     for (bool cancel : {false, true}) {
         for (bool stopX : {false, true}) {
             ei_device_scroll_discrete(pointer, 60, 60);

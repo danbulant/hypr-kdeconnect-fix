@@ -195,6 +195,12 @@ if(BUILD_TESTING)
   hkcf_apply_target_defaults(deskflow-input-test)
   add_test(NAME deskflow-input-test COMMAND deskflow-input-test)
 
+  add_executable(eis-repeat-test tests/eis_repeat_test.cpp)
+  target_link_libraries(eis-repeat-test PRIVATE Qt6::Core hkcf-libeis hkcf-libei)
+  hkcf_apply_target_defaults(eis-repeat-test)
+  add_test(NAME eis-repeat-test COMMAND eis-repeat-test)
+  set_tests_properties(eis-repeat-test PROPERTIES TIMEOUT 15)
+
   pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.20)
   set(TEST_SERVER_HEADERS)
   foreach(PROTOCOL_NAME virtual-keyboard-unstable-v1 wlr-virtual-pointer-unstable-v1)
