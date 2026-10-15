@@ -192,6 +192,27 @@ if(BUILD_TESTING)
   )
   hkcf_apply_target_defaults(deskflow-input-test)
   add_test(NAME deskflow-input-test COMMAND deskflow-input-test)
+
+  find_program(DBUS_RUN_SESSION_EXECUTABLE dbus-run-session REQUIRED)
+  add_executable(portal-session-test
+    tests/portal_session_test.cpp
+    src/portal_backend.cpp
+    src/eis_input_bridge.cpp
+    src/key_resolver.cpp
+  )
+  target_include_directories(portal-session-test PRIVATE src)
+  target_compile_definitions(portal-session-test PRIVATE HKCF_DESKFLOW_EXECUTABLE="${HKCF_DESKFLOW_EXECUTABLE}")
+  target_link_libraries(portal-session-test PRIVATE
+    Qt6::Core Qt6::DBus hkcf-libeis hkcf-libei
+    PkgConfig::XKBCOMMON PkgConfig::WAYLAND_CLIENT
+  )
+  hkcf_apply_target_defaults(portal-session-test)
+  add_test(NAME portal-session-test
+    COMMAND ${CMAKE_COMMAND} -E env --unset=WAYLAND_DISPLAY --unset=WAYLAND_SOCKET --unset=DISPLAY
+      ${DBUS_RUN_SESSION_EXECUTABLE} -- $<TARGET_FILE:portal-session-test>
+  )
+  set_tests_properties(portal-session-test PROPERTIES TIMEOUT 30)
+
 endif()
 
 configure_file(data/hypr-kdeconnect.portal.in hypr-kdeconnect.portal @ONLY)

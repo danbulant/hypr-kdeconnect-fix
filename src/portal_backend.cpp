@@ -346,6 +346,8 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
         Session session;
         session.owner = message.service();
         session.appId = security::normalizedAppId(*appId);
+        session.clientOwner = security::senderBusNameFromSessionPath(path).value_or(QString());
+        watchSessionOwners(session, connection);
         m_sessions.insert(path, session);
 
         QVariantMap results;
@@ -460,7 +462,7 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             return true;
 
         QString eisError;
-        const auto fd = m_eis.addClient(&eisError);
+        const auto fd = m_eis.addClient(sessionHandle->path(), &eisError);
         if (!fd) {
             connection.send(error(message, QDBusError::Failed, eisError));
             return true;
@@ -615,10 +617,49 @@ bool PortalBackend::handleSession(const QDBusMessage& message, const QDBusConnec
         return true;
     }
 
-    m_sessions.erase(session);
+    closeSession(message.path());
     connection.send(message.createReply());
     connection.send(QDBusMessage::createSignal(message.path(), QString::fromLatin1(kSessionInterface), QStringLiteral("Closed")));
     return true;
+}
+
+void PortalBackend::closeSession(const QString& path) {
+    m_eis.removeClient(path);
+    const auto session = m_sessions.take(path);
+    if (!m_ownerWatcher)
+        return;
+    for (const auto& owner : {session.owner, session.clientOwner}) {
+        bool inUse = false;
+        for (const auto& active : std::as_const(m_sessions)) {
+            if (active.owner == owner || active.clientOwner == owner) {
+                inUse = true;
+                break;
+            }
+        }
+        if (!inUse && !owner.isEmpty())
+            m_ownerWatcher->removeWatchedService(owner);
+    }
+}
+
+void PortalBackend::watchSessionOwners(const Session& session, const QDBusConnection& connection) {
+    if (!m_ownerWatcher) {
+        m_ownerWatcher = new QDBusServiceWatcher(QString::fromLatin1(kPortalFrontendService), connection,
+                                               QDBusServiceWatcher::WatchForOwnerChange, this);
+        connect(m_ownerWatcher, &QDBusServiceWatcher::serviceOwnerChanged, this,
+                [this](const QString& name, const QString& oldOwner, const QString& newOwner) {
+            if (!newOwner.isEmpty() && name != QString::fromLatin1(kPortalFrontendService))
+                return;
+            const auto paths = m_sessions.keys();
+            for (const auto& path : paths) {
+                const auto& session = m_sessions[path];
+                if (session.owner == oldOwner || session.clientOwner == oldOwner)
+                    closeSession(path);
+            }
+        });
+    }
+    m_ownerWatcher->addWatchedService(session.owner);
+    if (!session.clientOwner.isEmpty())
+        m_ownerWatcher->addWatchedService(session.clientOwner);
 }
 
 bool PortalBackend::handleProperties(const QDBusMessage& message, const QDBusConnection& connection) {

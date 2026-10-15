@@ -168,53 +168,64 @@ EisInputBridge::~EisInputBridge() {
     cleanup();
 }
 
-std::optional<int> EisInputBridge::addClient(QString* errorText) {
-    if (!ensureContext(errorText))
+std::optional<int> EisInputBridge::addClient(const QString& sessionId, QString* errorText) {
+    if (m_clients.contains(sessionId)) {
+        if (errorText)
+            *errorText = QStringLiteral("EIS client already exists for session");
         return std::nullopt;
+    }
 
-    const int fd = eis_backend_fd_add_client(m_eis);
+    // libeis does not identify a backend fd until its handshake completes.
+    // One context per session also makes an unhandshaken fd revocable.
+    eis* context = eis_new(this);
+    if (!context) {
+        if (errorText)
+            *errorText = QStringLiteral("failed to create EIS context");
+        return std::nullopt;
+    }
+    eis_log_set_handler(context, nullptr);
+    eis_log_set_priority(context, EIS_LOG_PRIORITY_ERROR);
+
+    const int rc = eis_setup_backend_fd(context);
+    const int fd = rc < 0 ? rc : eis_backend_fd_add_client(context);
     if (fd < 0) {
         if (errorText)
             *errorText = QStringLiteral("failed to create EIS client fd: %1").arg(QString::fromLocal8Bit(std::strerror(-fd)));
+        eis_unref(context);
         return std::nullopt;
     }
+
+    auto* notifier = new QSocketNotifier(eis_get_fd(context), QSocketNotifier::Read, this);
+    connect(notifier, &QSocketNotifier::activated, this, [this, context]() {
+        dispatch(context);
+    });
+    m_clients.insert(sessionId, {context, notifier});
     return fd;
 }
 
-bool EisInputBridge::ensureContext(QString* errorText) {
-    if (m_eis)
-        return true;
+void EisInputBridge::removeClient(const QString& sessionId) {
+    const auto it = m_clients.find(sessionId);
+    if (it == m_clients.end())
+        return;
+    const auto client = *it;
+    m_clients.erase(it);
+    delete client.notifier;
 
-    m_eis = eis_new(this);
-    if (!m_eis) {
-        if (errorText)
-            *errorText = QStringLiteral("failed to create EIS context");
-        return false;
+    const auto seats = m_seats.keys();
+    for (auto* seat : seats) {
+        auto* owner = m_seats.value(seat)->client;
+        if (eis_client_get_context(owner) == client.context) {
+            eis_client_disconnect(owner);
+            removeSeat(seat);
+        }
     }
-    eis_log_set_handler(m_eis, nullptr);
-    eis_log_set_priority(m_eis, EIS_LOG_PRIORITY_ERROR);
-
-    const int rc = eis_setup_backend_fd(m_eis);
-    if (rc < 0) {
-        if (errorText)
-            *errorText = QStringLiteral("failed to initialize EIS fd backend: %1").arg(QString::fromLocal8Bit(std::strerror(-rc)));
-        cleanup();
-        return false;
-    }
-
-    auto* notifier = new QSocketNotifier(eis_get_fd(m_eis), QSocketNotifier::Read, this);
-    connect(notifier, &QSocketNotifier::activated, this, [this]() {
-        dispatch();
-    });
-    m_notifier = notifier;
-    return true;
+    // Drops queued events and closes pending handshakes as well as live clients.
+    eis_unref(client.context);
 }
 
-void EisInputBridge::dispatch() {
-    if (!m_eis)
-        return;
-    eis_dispatch(m_eis);
-    while (eis_event* event = eis_get_event(m_eis)) {
+void EisInputBridge::dispatch(eis* context) {
+    eis_dispatch(context);
+    while (eis_event* event = eis_get_event(context)) {
         handleEvent(event);
         eis_event_unref(event);
     }
@@ -335,6 +346,10 @@ void EisInputBridge::handleDeviceClosed(eis_device* device) {
 }
 
 void EisInputBridge::handleInputEvent(eis_event* event) {
+    auto* device = eis_event_get_device(event);
+    const auto* state = device ? m_seats.value(eis_device_get_seat(device), nullptr) : nullptr;
+    if (!state || (device != state->keyboard && device != state->pointer && device != state->absolutePointer))
+        return;
     switch (eis_event_get_type(event)) {
     case EIS_EVENT_POINTER_MOTION:
         m_input.pointerMotion(eis_event_pointer_get_dx(event), eis_event_pointer_get_dy(event));
@@ -500,17 +515,9 @@ void EisInputBridge::removeSeat(eis_seat* seat) {
 }
 
 void EisInputBridge::cleanup() {
-    const QList<eis_seat*> seats = m_seats.keys();
-    for (eis_seat* seat : seats)
-        removeSeat(seat);
-
-    delete m_notifier;
-    m_notifier = nullptr;
-
-    if (m_eis) {
-        eis_unref(m_eis);
-        m_eis = nullptr;
-    }
+    const auto sessions = m_clients.keys();
+    for (const auto& session : sessions)
+        removeClient(session);
 }
 
 } // namespace hkcf

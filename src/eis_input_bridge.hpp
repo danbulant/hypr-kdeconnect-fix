@@ -27,9 +27,16 @@ class EisInputBridge : public QObject {
     EisInputBridge(const EisInputBridge&) = delete;
     EisInputBridge& operator=(const EisInputBridge&) = delete;
 
-    [[nodiscard]] std::optional<int> addClient(QString* errorText = nullptr);
+    [[nodiscard]] std::optional<int> addClient(const QString& sessionId, QString* errorText = nullptr);
+
+    void removeClient(const QString& sessionId);
 
   private:
+    struct ClientContext {
+        eis* context = nullptr;
+        QObject* notifier = nullptr;
+    };
+
     struct SeatState {
         eis_client* client = nullptr;
         eis_device* keyboard = nullptr;
@@ -37,8 +44,7 @@ class EisInputBridge : public QObject {
         eis_device* absolutePointer = nullptr;
     };
 
-    [[nodiscard]] bool ensureContext(QString* errorText);
-    void dispatch();
+    void dispatch(eis* context);
     void handleEvent(eis_event* event);
     void handleClientConnect(eis_client* client);
     void handleClientDisconnect(eis_client* client);
@@ -53,8 +59,7 @@ class EisInputBridge : public QObject {
     void cleanup();
 
     WaylandInput& m_input;
-    eis* m_eis = nullptr;
-    QObject* m_notifier = nullptr;
+    QHash<QString, ClientContext> m_clients;
     QHash<eis_seat*, SeatState*> m_seats;
     QHash<eis_device*, QPair<int, int>> m_scrollRemainders;
     QHash<eis_device*, QSet<std::uint32_t>> m_pressedKeys;

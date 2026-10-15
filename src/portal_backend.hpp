@@ -6,6 +6,7 @@
 #include <QDBusConnection>
 #include <QDBusError>
 #include <QDBusObjectPath>
+#include <QDBusServiceWatcher>
 #include <QDBusVirtualObject>
 #include <QElapsedTimer>
 #include <QHash>
@@ -26,6 +27,7 @@ class PortalBackend : public QDBusVirtualObject {
     struct Session {
         QString owner;
         QString appId;
+        QString clientOwner;
         std::uint32_t requestedTypes = 0;
         qint64 rateWindowStartMs = 0;
         int eventsInRateWindow = 0;
@@ -59,6 +61,10 @@ class PortalBackend : public QDBusVirtualObject {
     bool sendInputResult(const QDBusMessage& message, const QDBusConnection& connection, bool ok);
     bool checkNotifyRate(const QDBusMessage& message, const QDBusConnection& connection, Session& session);
 
+    void closeSession(const QString& path);
+    void watchSessionOwners(const Session& session, const QDBusConnection& connection);
+
+    QDBusServiceWatcher* m_ownerWatcher = nullptr;
     QHash<QString, Session> m_sessions;
     WaylandInput m_input;
     EisInputBridge m_eis;

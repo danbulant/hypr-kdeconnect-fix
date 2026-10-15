@@ -44,7 +44,7 @@ void testEis() {
     hkcf::WaylandInput input;
     hkcf::EisInputBridge bridge(input);
     QString error;
-    auto fd = bridge.addClient(&error);
+    auto fd = bridge.addClient(QStringLiteral("first"), &error);
     check(fd.has_value(), "create EIS client");
     auto* client = ei_new_sender(nullptr);
     ei_configure_name(client, "deskflow-input-test");
@@ -181,7 +181,7 @@ void testEis() {
             sync();
         }
     }
-    const auto secondFd = bridge.addClient(&error);
+    const auto secondFd = bridge.addClient(QStringLiteral("second"), &error);
     check(secondFd.has_value(), "create second client");
     secondClient = ei_new_sender(nullptr);
     check(ei_setup_backend_fd(secondClient, *secondFd) == 0, "connect second client");
