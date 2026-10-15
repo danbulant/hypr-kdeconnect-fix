@@ -1,4 +1,5 @@
 // Real WaylandInput against an in-process isolated protocol server.
+#include "input_state.hpp"
 #include "virtual-keyboard-unstable-v1-server-protocol.h"
 #include "wayland_input.hpp"
 #include "wlr-virtual-pointer-unstable-v1-server-protocol.h"
@@ -163,6 +164,63 @@ int main(int argc, char **argv) {
       check(input.keyboardKeysym('A', false), "balanced release");
     }
     released();
+    for (bool releaseRawFirst : {false, true}) {
+      hkcf::InputState state(input);
+      int rawOwner, symbolOwner;
+      check(state.keyboardKeycode(&rawOwner, KEY_LEFTSHIFT, true),
+            "raw owner Shift");
+      check(state.keyboardKeycode(&rawOwner, KEY_A, true), "raw owner A");
+      check(state.keyboardKeysym(&symbolOwner, 'A', true),
+            "symbol owner uppercase A");
+      check(state.keyboardKeysym(&symbolOwner, 'A', true),
+            "symbol owner repeat");
+      state.releaseOwner(releaseRawFirst ? &rawOwner : &symbolOwner);
+      sync();
+      {
+        std::lock_guard lock(capture.mutex);
+        check(capture.mods.back() != 0,
+              "remaining owner keeps real XKB Shift depressed");
+      }
+      state.releaseOwner(releaseRawFirst ? &symbolOwner : &rawOwner);
+      released();
+    }
+    {
+      hkcf::InputState state(input);
+      int owner;
+      std::size_t before;
+      {
+        std::lock_guard lock(capture.mutex);
+        before = capture.keys.size();
+      }
+      for (int i = 0; i < 3; ++i)
+        check(state.keyboardKeysym(&owner, 'A', true),
+              "owned uppercase repeat");
+      check(state.keyboardKeysym(&owner, 'A', false),
+            "owned uppercase release");
+      released();
+      {
+        std::lock_guard lock(capture.mutex);
+        const std::vector<Key> expected{{KEY_LEFTSHIFT, 1}, {KEY_A, 1},
+                                        {KEY_A, 1},         {KEY_A, 1},
+                                        {KEY_A, 0},         {KEY_LEFTSHIFT, 0}};
+        check(capture.keys.size() == before + expected.size(),
+              "owned keysym repeats reach Wayland");
+        for (std::size_t i = 0; i < expected.size(); ++i)
+          check(capture.keys[before + i].code == expected[i].code &&
+                    capture.keys[before + i].state == expected[i].state,
+                "owned keysym repeat event ordering");
+      }
+    }
+    for (uint32_t modifier : {KEY_LEFTSHIFT, KEY_LEFTCTRL, KEY_LEFTALT}) {
+      hkcf::InputState state(input);
+      int owner;
+      for (int i = 0; i < 3; ++i)
+        check(state.keyboardKeycode(&owner, modifier, true),
+              "owned modifier repeat");
+      check(state.keyboardKeycode(&owner, modifier, false),
+            "owned modifier release");
+      released();
+    }
     std::cout << "Shifted keysym repeat and release tests passed on isolated "
                  "Wayland server\n";
   } catch (const std::exception &error) {

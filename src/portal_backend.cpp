@@ -156,7 +156,8 @@ void sendPortalRequestResponse(const QDBusConnection& connection, const QDBusMes
 
 PortalBackend::PortalBackend(QObject* parent)
     : QDBusVirtualObject(parent)
-    , m_eis(m_input, this) {
+    , m_inputs(m_input)
+    , m_eis(m_input, m_inputs, this) {
     m_rateTimer.start();
 }
 
@@ -536,7 +537,7 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid pointer button or state")));
             return true;
         }
-        return sendInputResult(message, connection, m_input.pointerButton(buttonCode, security::stateToPressed(*state)));
+        return sendInputResult(message, connection, m_inputs.pointerButton(session->inputOwner.data(), buttonCode, security::stateToPressed(*state)));
     }
 
     if (member == QStringLiteral("NotifyPointerAxis")) {
@@ -579,7 +580,7 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid keyboard keycode or state")));
             return true;
         }
-        return sendInputResult(message, connection, m_input.keyboardKeycode(keycodeValue, security::stateToPressed(*state)));
+        return sendInputResult(message, connection, m_inputs.keyboardKeycode(session->inputOwner.data(), keycodeValue, security::stateToPressed(*state)));
     }
 
     if (member == QStringLiteral("NotifyKeyboardKeysym")) {
@@ -594,7 +595,7 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid keyboard keysym or state")));
             return true;
         }
-        return sendInputResult(message, connection, m_input.keyboardKeysym(keysymValue, security::stateToPressed(*state)));
+        return sendInputResult(message, connection, m_inputs.keyboardKeysym(session->inputOwner.data(), keysymValue, security::stateToPressed(*state)));
     }
 
     connection.send(error(message, QDBusError::UnknownMethod, QStringLiteral("unknown RemoteDesktop method %1").arg(member)));
@@ -631,6 +632,7 @@ bool PortalBackend::handleSession(const QDBusMessage& message, const QDBusConnec
 void PortalBackend::closeSession(const QString& path) {
     m_eis.removeClient(path);
     const auto session = m_sessions.take(path);
+    m_inputs.releaseOwner(session.inputOwner.data());
     if (!m_ownerWatcher)
         return;
     for (const auto& owner : {session.owner, session.clientOwner}) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "eis_input_bridge.hpp"
+#include "input_state.hpp"
 #include "wayland_input.hpp"
 
 #include <QDBusConnection>
@@ -25,6 +26,7 @@ class PortalBackend : public QDBusVirtualObject {
 
   private:
     struct Session {
+        QSharedPointer<int> inputOwner = QSharedPointer<int>::create(0);
         QString owner;
         QString appId;
         QString clientOwner;
@@ -67,6 +69,7 @@ class PortalBackend : public QDBusVirtualObject {
     QDBusServiceWatcher* m_ownerWatcher = nullptr;
     QHash<QString, Session> m_sessions;
     WaylandInput m_input;
+    InputState m_inputs;
     EisInputBridge m_eis;
     QElapsedTimer m_rateTimer;
 };

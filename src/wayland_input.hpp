@@ -35,7 +35,7 @@ class WaylandInput {
     bool pointerButton(std::uint32_t button, bool pressed);
     bool pointerAxis(double dx, double dy);
     bool pointerAxisDiscrete(std::uint32_t axis, int steps);
-    bool keyboardKeycode(std::uint32_t keycode, bool pressed);
+    bool keyboardKeycode(std::uint32_t keycode, bool pressed, bool repeated = false);
     bool keyboardKeysym(std::uint32_t keysym, bool pressed);
     [[nodiscard]] QRect logicalBounds() const;
 

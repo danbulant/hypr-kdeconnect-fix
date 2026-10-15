@@ -4,7 +4,6 @@
 
 #include <QObject>
 #include <QHash>
-#include <QSet>
 #include <QString>
 
 struct eis;
@@ -16,12 +15,13 @@ struct eis_seat;
 namespace hkcf {
 
 class WaylandInput;
+class InputState;
 
 class EisInputBridge : public QObject {
     Q_OBJECT
 
   public:
-    explicit EisInputBridge(WaylandInput& input, QObject* parent = nullptr);
+    explicit EisInputBridge(WaylandInput& input, InputState& inputs, QObject* parent = nullptr);
     ~EisInputBridge() override;
 
     EisInputBridge(const EisInputBridge&) = delete;
@@ -61,11 +61,10 @@ class EisInputBridge : public QObject {
     void cleanup();
 
     WaylandInput& m_input;
+    InputState& m_inputs;
     QHash<QString, ClientContext> m_clients;
     QHash<eis_seat*, SeatState*> m_seats;
     QHash<eis_device*, QPair<int, int>> m_scrollRemainders;
-    QHash<eis_device*, QSet<std::uint32_t>> m_pressedKeys;
-    QHash<eis_device*, QSet<std::uint32_t>> m_pressedButtons;
 };
 
 } // namespace hkcf

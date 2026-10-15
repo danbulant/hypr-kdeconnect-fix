@@ -128,6 +128,7 @@ endforeach()
 add_executable(hypr-kdeconnect-portal
   ${PROTOCOL_SOURCES}
   src/eis_input_bridge.cpp
+  src/input_state.cpp
   src/key_resolver.cpp
   src/main.cpp
   src/portal_backend.cpp
@@ -180,6 +181,7 @@ if(BUILD_TESTING)
   add_executable(deskflow-input-test
     tests/deskflow_input_test.cpp
     src/eis_input_bridge.cpp
+    src/input_state.cpp
     src/key_resolver.cpp
   )
   target_include_directories(deskflow-input-test PRIVATE src)
@@ -206,7 +208,7 @@ if(BUILD_TESTING)
     list(APPEND TEST_SERVER_HEADERS ${SERVER_HEADER})
   endforeach()
   add_executable(wayland-keysym-test
-    tests/wayland_keysym_test.cpp src/wayland_input.cpp src/key_resolver.cpp
+    tests/wayland_keysym_test.cpp src/wayland_input.cpp src/input_state.cpp src/key_resolver.cpp
     ${PROTOCOL_SOURCES} ${TEST_SERVER_HEADERS}
   )
   target_include_directories(wayland-keysym-test PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/protocols)
@@ -223,6 +225,7 @@ if(BUILD_TESTING)
     tests/portal_session_test.cpp
     src/portal_backend.cpp
     src/eis_input_bridge.cpp
+    src/input_state.cpp
     src/key_resolver.cpp
   )
   target_include_directories(portal-session-test PRIVATE src)

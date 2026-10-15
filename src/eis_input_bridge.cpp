@@ -1,6 +1,7 @@
 #include "eis_input_bridge.hpp"
 
 #include "wayland_input.hpp"
+#include "input_state.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -129,28 +130,6 @@ void configureRegion(eis_device* device, const QRect& bounds) {
     eis_region_unref(region);
 }
 
-using PressedInputs = QHash<eis_device*, QSet<std::uint32_t>>;
-
-bool isInputPressed(const PressedInputs& inputs, std::uint32_t code) {
-    return std::any_of(inputs.cbegin(), inputs.cend(), [code](const auto& held) { return held.contains(code); });
-}
-
-// All EIS devices share one Wayland sink. Only forward aggregate transitions.
-bool updatePressedInput(PressedInputs& inputs, eis_device* device, std::uint32_t code, bool pressed) {
-    const bool wasPressed = isInputPressed(inputs, code);
-    if (pressed) {
-        inputs[device].insert(code);
-    } else {
-        auto it = inputs.find(device);
-        if (it != inputs.end()) {
-            it->remove(code);
-            if (it->isEmpty())
-                inputs.erase(it);
-        }
-    }
-    return wasPressed != isInputPressed(inputs, code);
-}
-
 int wheelStep(double delta) {
     if (!std::isfinite(delta) || delta == 0.0)
         return 0;
@@ -159,9 +138,10 @@ int wheelStep(double delta) {
 
 } // namespace
 
-EisInputBridge::EisInputBridge(WaylandInput& input, QObject* parent)
+EisInputBridge::EisInputBridge(WaylandInput& input, InputState& inputs, QObject* parent)
     : QObject(parent)
-    , m_input(input) {
+    , m_input(input)
+    , m_inputs(inputs) {
 }
 
 EisInputBridge::~EisInputBridge() {
@@ -373,9 +353,7 @@ void EisInputBridge::handleInputEvent(eis_event* event) {
         m_input.pointerMotionAbsolute(eis_event_pointer_get_absolute_x(event), eis_event_pointer_get_absolute_y(event));
         break;
     case EIS_EVENT_BUTTON_BUTTON:
-        if (updatePressedInput(m_pressedButtons, eis_event_get_device(event),
-                               eis_event_button_get_button(event), eis_event_button_get_is_press(event)))
-            m_input.pointerButton(eis_event_button_get_button(event), eis_event_button_get_is_press(event));
+        m_inputs.pointerButton(device, eis_event_button_get_button(event), eis_event_button_get_is_press(event));
         break;
     case EIS_EVENT_SCROLL_DELTA:
         if (const int x = wheelStep(eis_event_scroll_get_dx(event)); x != 0)
@@ -418,9 +396,7 @@ void EisInputBridge::handleInputEvent(eis_event* event) {
         break;
     }
     case EIS_EVENT_KEYBOARD_KEY:
-        if (updatePressedInput(m_pressedKeys, eis_event_get_device(event),
-                               eis_event_keyboard_get_key(event), eis_event_keyboard_get_key_is_press(event)))
-            m_input.keyboardKeycode(eis_event_keyboard_get_key(event), eis_event_keyboard_get_key_is_press(event));
+        m_inputs.keyboardKeycode(device, eis_event_keyboard_get_key(event), eis_event_keyboard_get_key_is_press(event));
         break;
     default:
         break;
@@ -498,14 +474,7 @@ eis_device* EisInputBridge::addAbsolutePointer(eis_seat* seat) {
 }
 
 void EisInputBridge::releaseInput(eis_device* device) {
-    for (const auto key : m_pressedKeys.take(device)) {
-        if (!isInputPressed(m_pressedKeys, key))
-            m_input.keyboardKeycode(key, false);
-    }
-    for (const auto button : m_pressedButtons.take(device)) {
-        if (!isInputPressed(m_pressedButtons, button))
-            m_input.pointerButton(button, false);
-    }
+    m_inputs.releaseOwner(device);
     m_scrollRemainders.remove(device);
 }
 

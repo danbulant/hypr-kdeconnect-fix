@@ -348,7 +348,7 @@ bool WaylandInput::pointerAxisDiscrete(std::uint32_t axis, int steps) {
     return flush();
 }
 
-bool WaylandInput::keyboardKeycode(std::uint32_t keycode, bool pressed) {
+bool WaylandInput::keyboardKeycode(std::uint32_t keycode, bool pressed, bool repeated) {
     if (!security::isAllowedKeyboardKeycode(keycode)) {
         setError(QStringLiteral("invalid keyboard keycode"));
         return false;
@@ -361,7 +361,9 @@ bool WaylandInput::keyboardKeycode(std::uint32_t keycode, bool pressed) {
     if (!ok)
         return false;
 
-    updateModifiers(keycode, pressed);
+    // A repeat has no new logical hold; xkbcommon counts modifier presses.
+    if (!repeated)
+        updateModifiers(keycode, pressed);
     return true;
 }
 

@@ -48,7 +48,7 @@ bool WaylandInput::pointerButton(uint32_t code, bool pressed) {
 }
 bool WaylandInput::pointerAxis(double, double) { ++inputEvents; return true; }
 bool WaylandInput::pointerAxisDiscrete(uint32_t, int) { ++inputEvents; return true; }
-bool WaylandInput::keyboardKeycode(uint32_t code, bool pressed) {
+bool WaylandInput::keyboardKeycode(uint32_t code, bool pressed, bool) {
     ++inputEvents;
     if (pressed) keys.insert(code); else keys.remove(code);
     return true;
@@ -157,6 +157,11 @@ struct Portal {
         success(call(desktop, remote, "Start", {request, session, app, QString(), QVariantMap{}}));
         return path;
     }
+    QDBusMessage notify(const QString& path, const QString& method, const QList<QVariant>& values) {
+        QList<QVariant> args{QVariant::fromValue(QDBusObjectPath(path)), QVariantMap{}};
+        args.append(values);
+        return call(desktop, remote, method, args);
+    }
     int connectEis(const QString& path) {
         const auto reply = call(desktop, remote, "ConnectToEIS",
             {QVariant::fromValue(QDBusObjectPath(path)), QString("org.kde.kdeconnect"), QVariantMap{}});
@@ -200,6 +205,62 @@ void testRevocation(Portal& portal) {
     ::close(pendingFd);
 }
 
+void testNotifyOwnership(Portal& portal) {
+    const auto notify = [&](const QString& path, const QString& method, uint32_t code, bool pressed) {
+        check(portal.notify(path, method, {int(code), uint32_t(pressed)}).type() != QDBusMessage::ErrorMessage,
+              "Notify input accepted");
+    };
+    const QString key = QStringLiteral("NotifyKeyboardKeycode");
+    const QString button = QStringLiteral("NotifyPointerButton");
+    const auto a = portal.create(), b = portal.create();
+    notify(a, key, KEY_A, true);
+    notify(a, button, BTN_LEFT, true);
+    const auto before = inputEvents;
+    notify(b, key, KEY_A, false);
+    notify(b, button, BTN_LEFT, false);
+    check(inputEvents == before && keys.contains(KEY_A) && buttons.contains(BTN_LEFT), "unmatched release cannot affect another session");
+    notify(b, key, KEY_A, true);
+    notify(b, button, BTN_LEFT, true);
+    check(inputEvents == before, "shared Notify presses aggregate");
+    portal.close(a);
+    check(keys.contains(KEY_A) && buttons.contains(BTN_LEFT), "Close preserves other Notify holders");
+    portal.close(b);
+    check(keys.isEmpty() && buttons.isEmpty(), "last Notify Close releases held input");
+
+    for (bool closeEisFirst : {false, true}) {
+        const auto notifyPath = portal.create(), eisPath = portal.create();
+        EisClient client(portal.connectEis(eisPath));
+        client.discover();
+        notify(notifyPath, key, KEY_LEFTCTRL, true);
+        notify(notifyPath, button, BTN_LEFT, true);
+        client.key(KEY_LEFTCTRL, true);
+        client.key(KEY_B, true); // A distinct key is a barrier for the shared press.
+        client.button(BTN_LEFT, true);
+        waitFor([&] { return keys.contains(KEY_B); }, [&] { client.pump(); }, "mixed ownership input");
+        // A D-Bus round trip allows all already-readable EIS frames to drain.
+        check(portal.call(desktop, "org.freedesktop.DBus.Peer", "Ping").type() != QDBusMessage::ErrorMessage, "input barrier");
+        portal.close(closeEisFirst ? eisPath : notifyPath);
+        check(keys.contains(KEY_LEFTCTRL) && buttons.contains(BTN_LEFT), "mixed Close preserves remaining owner");
+        portal.close(closeEisFirst ? notifyPath : eisPath);
+        check(keys.isEmpty() && buttons.isEmpty(), "mixed Close releases last owner");
+    }
+
+    const auto symbolPath = portal.create(), rawPath = portal.create();
+    notify(rawPath, key, KEY_LEFTSHIFT, true);
+    notify(rawPath, key, KEY_A, true);
+    notify(symbolPath, "NotifyKeyboardKeysym", 'A', true);
+    notify(symbolPath, "NotifyKeyboardKeysym", 'A', true);
+    portal.close(symbolPath);
+    check(keys.contains(KEY_LEFTSHIFT) && keys.contains(KEY_A), "keysym cleanup preserves raw keycode holders");
+    portal.close(rawPath);
+    check(keys.isEmpty(), "raw and keysym ownership cleanup");
+    const auto shifted = portal.create();
+    notify(shifted, "NotifyKeyboardKeysym", 'B', true);
+    check(keys.contains(KEY_B) && keys.contains(KEY_LEFTSHIFT), "keysym owns physical key and synthetic shift");
+    portal.close(shifted);
+    check(keys.isEmpty(), "Notify Close releases synthesized Shift");
+}
+
 void testDeviceGrants(Portal& portal) {
     for (uint32_t types : {1u, 2u}) {
         const auto path = portal.create(types);
@@ -231,22 +292,25 @@ void testOwnerLoss(Portal& portal) {
     const auto path = portal.create();
     EisClient client(portal.connectEis(path));
     client.discover();
+    check(portal.notify(path, "NotifyKeyboardKeysym", {int('C'), 1u}).type() != QDBusMessage::ErrorMessage, "Notify keysym before owner loss");
+    check(portal.notify(path, "NotifyPointerButton", {int(BTN_RIGHT), 1u}).type() != QDBusMessage::ErrorMessage, "Notify button before owner loss");
     client.key(KEY_LEFTSHIFT, true);
     waitFor([&] { return keys.contains(KEY_LEFTSHIFT); }, [&] { client.pump(); }, "owner holds shift");
     portal.owner = QDBusConnection("disconnected");
     QDBusConnection::disconnectFromBus("owner");
     waitFor([&] { return client.disconnected; }, [&] { client.pump(); }, "originating owner disconnect revokes EIS");
-    check(keys.isEmpty(), "owner loss releases EIS input");
+    check(keys.isEmpty() && buttons.isEmpty(), "owner loss releases EIS and Notify input");
     portal.owner = QDBusConnection::connectToBus(QDBusConnection::SessionBus, "owner2");
 
     const auto frontendPath = portal.create();
     EisClient frontendClient(portal.connectEis(frontendPath));
     frontendClient.discover();
+    check(portal.notify(frontendPath, "NotifyKeyboardKeycode", {int(KEY_LEFTALT), 1u}).type() != QDBusMessage::ErrorMessage, "Notify key before frontend loss");
     frontendClient.button(BTN_LEFT, true);
     waitFor([&] { return buttons.contains(BTN_LEFT); }, [&] { frontendClient.pump(); }, "frontend holds button");
     check(portal.frontend.unregisterService("org.freedesktop.portal.Desktop"), "frontend loses service");
     waitFor([&] { return frontendClient.disconnected; }, [&] { frontendClient.pump(); }, "frontend owner loss revokes EIS");
-    check(buttons.isEmpty(), "frontend loss releases EIS input");
+    check(buttons.isEmpty() && keys.isEmpty(), "frontend loss releases EIS and Notify input");
     check(portal.frontend.registerService("org.freedesktop.portal.Desktop"), "restore private frontend");
 }
 }
@@ -257,6 +321,7 @@ int main(int argc, char** argv) {
         check(qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS"), "run on a private dbus-run-session bus");
         Portal portal;
         testRevocation(portal);
+        testNotifyOwnership(portal);
         testDeviceGrants(portal);
         testOwnerLoss(portal);
         std::cout << "Portal session EIS lifetime tests passed\n";

@@ -1,4 +1,5 @@
 #include "eis_input_bridge.hpp"
+#include "input_state.hpp"
 #include "wayland_input.hpp"
 
 #include <QCoreApplication>
@@ -34,7 +35,7 @@ bool WaylandInput::pointerButton(uint32_t button, bool pressed) {
     return true;
 }
 bool WaylandInput::pointerAxisDiscrete(uint32_t axis, int steps) { scrolls.append({axis, steps}); return true; }
-bool WaylandInput::keyboardKeycode(uint32_t key, bool pressed) {
+bool WaylandInput::keyboardKeycode(uint32_t key, bool pressed, bool) {
     if (pressed) keys.insert(key); else keys.remove(key);
     return true;
 }
@@ -42,7 +43,8 @@ bool WaylandInput::keyboardKeycode(uint32_t key, bool pressed) {
 
 void testEis() {
     hkcf::WaylandInput input;
-    hkcf::EisInputBridge bridge(input);
+    hkcf::InputState inputs(input);
+    hkcf::EisInputBridge bridge(input, inputs);
     QString error;
     auto fd = bridge.addClient(QStringLiteral("first"), 3, &error);
     check(fd.has_value(), "create EIS client");
