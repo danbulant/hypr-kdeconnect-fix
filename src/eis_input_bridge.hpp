@@ -27,18 +27,20 @@ class EisInputBridge : public QObject {
     EisInputBridge(const EisInputBridge&) = delete;
     EisInputBridge& operator=(const EisInputBridge&) = delete;
 
-    [[nodiscard]] std::optional<int> addClient(const QString& sessionId, QString* errorText = nullptr);
+    [[nodiscard]] std::optional<int> addClient(const QString& sessionId, std::uint32_t deviceTypes, QString* errorText = nullptr);
 
     void removeClient(const QString& sessionId);
 
   private:
     struct ClientContext {
         eis* context = nullptr;
+        std::uint32_t deviceTypes = 0;
         QObject* notifier = nullptr;
     };
 
     struct SeatState {
         eis_client* client = nullptr;
+        std::uint32_t deviceTypes = 0;
         eis_device* keyboard = nullptr;
         eis_device* pointer = nullptr;
         eis_device* absolutePointer = nullptr;

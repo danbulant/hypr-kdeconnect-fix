@@ -375,6 +375,11 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             return true;
         }
 
+        if (session->started) {
+            connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("devices cannot be selected after Start")));
+            return true;
+        }
+
         const auto requestedTypes = uintOption(*options, QStringLiteral("types"), kSupportedDevices);
         if (!requestedTypes) {
             connection.send(error(message, QDBusError::InvalidArgs, QStringLiteral("invalid device type mask")));
@@ -462,7 +467,7 @@ bool PortalBackend::handleRemoteDesktop(const QDBusMessage& message, const QDBus
             return true;
 
         QString eisError;
-        const auto fd = m_eis.addClient(sessionHandle->path(), &eisError);
+        const auto fd = m_eis.addClient(sessionHandle->path(), session->requestedTypes, &eisError);
         if (!fd) {
             connection.send(error(message, QDBusError::Failed, eisError));
             return true;

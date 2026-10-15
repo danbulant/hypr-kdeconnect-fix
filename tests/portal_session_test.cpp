@@ -66,6 +66,8 @@ struct EisClient {
     ei_device* keyboard = nullptr;
     ei_device* pointer = nullptr;
     bool disconnected = false;
+    uint32_t capabilities = 0;
+    bool seatSeen = false;
 
     explicit EisClient(int fd) {
         check(ei_setup_backend_fd(client, fd) == 0, "EIS fd setup");
@@ -82,6 +84,10 @@ struct EisClient {
             auto* device = ei_event_get_device(event);
             switch (ei_event_get_type(event)) {
             case EI_EVENT_SEAT_ADDED:
+                seatSeen = true;
+                if (ei_seat_has_capability(ei_event_get_seat(event), EI_DEVICE_CAP_KEYBOARD)) capabilities |= 1;
+                for (auto cap : {EI_DEVICE_CAP_POINTER, EI_DEVICE_CAP_POINTER_ABSOLUTE, EI_DEVICE_CAP_BUTTON, EI_DEVICE_CAP_SCROLL})
+                    if (ei_seat_has_capability(ei_event_get_seat(event), cap)) capabilities |= 2;
                 ei_seat_bind_capabilities(ei_event_get_seat(event), EI_DEVICE_CAP_KEYBOARD,
                     EI_DEVICE_CAP_POINTER, EI_DEVICE_CAP_POINTER_ABSOLUTE,
                     EI_DEVICE_CAP_BUTTON, EI_DEVICE_CAP_SCROLL, nullptr);
@@ -99,8 +105,9 @@ struct EisClient {
             ei_event_unref(event);
         }
     }
-    void discover() {
-        waitFor([&] { return keyboard && pointer; }, [&] { pump(); }, "EIS discovery");
+    void discover(uint32_t types = 3) {
+        waitFor([&] { return seatSeen && (!(types & 1) || keyboard) && (!(types & 2) || pointer); },
+                [&] { pump(); }, "EIS discovery");
     }
     void key(uint32_t code, bool pressed) {
         ei_device_keyboard_key(keyboard, code, pressed);
@@ -193,6 +200,33 @@ void testRevocation(Portal& portal) {
     ::close(pendingFd);
 }
 
+void testDeviceGrants(Portal& portal) {
+    for (uint32_t types : {1u, 2u}) {
+        const auto path = portal.create(types);
+        EisClient client(portal.connectEis(path));
+        client.discover(types);
+        check(client.capabilities == types, "EIS only announces granted capabilities");
+        check(bool(client.keyboard) == bool(types & 1) && bool(client.pointer) == bool(types & 2),
+              "ungranted devices are not created even when requested");
+        const auto before = inputEvents;
+        if (types == 1) {
+            client.key(KEY_A, true);
+            waitFor([&] { return keys.contains(KEY_A); }, [&] { client.pump(); }, "granted keyboard input");
+            check(buttons.isEmpty() && inputEvents == before + 1, "keyboard-only session cannot inject pointer input");
+        } else {
+            client.button(BTN_LEFT, true);
+            waitFor([&] { return buttons.contains(BTN_LEFT); }, [&] { client.pump(); }, "granted pointer input");
+            check(keys.isEmpty() && inputEvents == before + 1, "pointer-only session cannot inject keyboard input");
+        }
+        const auto select = portal.call(desktop, remote, "SelectDevices", {
+            QVariant::fromValue(QDBusObjectPath(desktop + "/request/1_999/change")),
+            QVariant::fromValue(QDBusObjectPath(path)), QString("org.kde.kdeconnect"), QVariantMap{{"types", 3u}}});
+        check(select.type() == QDBusMessage::ErrorMessage, "cannot change grants after Start");
+        portal.close(path);
+        check(keys.isEmpty() && buttons.isEmpty(), "restricted session cleanup");
+    }
+}
+
 void testOwnerLoss(Portal& portal) {
     const auto path = portal.create();
     EisClient client(portal.connectEis(path));
@@ -223,6 +257,7 @@ int main(int argc, char** argv) {
         check(qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS"), "run on a private dbus-run-session bus");
         Portal portal;
         testRevocation(portal);
+        testDeviceGrants(portal);
         testOwnerLoss(portal);
         std::cout << "Portal session EIS lifetime tests passed\n";
         return 0;

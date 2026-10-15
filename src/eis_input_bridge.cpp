@@ -168,7 +168,7 @@ EisInputBridge::~EisInputBridge() {
     cleanup();
 }
 
-std::optional<int> EisInputBridge::addClient(const QString& sessionId, QString* errorText) {
+std::optional<int> EisInputBridge::addClient(const QString& sessionId, std::uint32_t deviceTypes, QString* errorText) {
     if (m_clients.contains(sessionId)) {
         if (errorText)
             *errorText = QStringLiteral("EIS client already exists for session");
@@ -199,7 +199,7 @@ std::optional<int> EisInputBridge::addClient(const QString& sessionId, QString* 
     connect(notifier, &QSocketNotifier::activated, this, [this, context]() {
         dispatch(context);
     });
-    m_clients.insert(sessionId, {context, notifier});
+    m_clients.insert(sessionId, {context, deviceTypes, notifier});
     return fd;
 }
 
@@ -280,19 +280,30 @@ void EisInputBridge::handleClientConnect(eis_client* client) {
         return;
     }
 
+    const auto context = std::find_if(m_clients.cbegin(), m_clients.cend(), [client](const auto& state) {
+        return state.context == eis_client_get_context(client);
+    });
+    if (context == m_clients.cend()) {
+        eis_client_disconnect(client);
+        return;
+    }
     eis_client_connect(client);
 
     eis_seat* seat = eis_client_new_seat(client, "default");
     if (!seat)
         return;
-    eis_seat_configure_capability(seat, EIS_DEVICE_CAP_KEYBOARD);
-    eis_seat_configure_capability(seat, EIS_DEVICE_CAP_POINTER);
-    eis_seat_configure_capability(seat, EIS_DEVICE_CAP_POINTER_ABSOLUTE);
-    eis_seat_configure_capability(seat, EIS_DEVICE_CAP_BUTTON);
-    eis_seat_configure_capability(seat, EIS_DEVICE_CAP_SCROLL);
+    if (context->deviceTypes & 1u)
+        eis_seat_configure_capability(seat, EIS_DEVICE_CAP_KEYBOARD);
+    if (context->deviceTypes & 2u) {
+        eis_seat_configure_capability(seat, EIS_DEVICE_CAP_POINTER);
+        eis_seat_configure_capability(seat, EIS_DEVICE_CAP_POINTER_ABSOLUTE);
+        eis_seat_configure_capability(seat, EIS_DEVICE_CAP_BUTTON);
+        eis_seat_configure_capability(seat, EIS_DEVICE_CAP_SCROLL);
+    }
 
     auto* state = new SeatState;
     state->client = client;
+    state->deviceTypes = context->deviceTypes;
     m_seats.insert(seat, state);
     eis_seat_add(seat);
 }
@@ -313,13 +324,13 @@ void EisInputBridge::handleSeatBind(eis_event* event) {
     if (!state)
         return;
 
-    if (eis_event_seat_has_capability(event, EIS_DEVICE_CAP_KEYBOARD) && !state->keyboard)
+    if ((state->deviceTypes & 1u) && eis_event_seat_has_capability(event, EIS_DEVICE_CAP_KEYBOARD) && !state->keyboard)
         state->keyboard = addKeyboard(seat);
-    if ((eis_event_seat_has_capability(event, EIS_DEVICE_CAP_POINTER) || eis_event_seat_has_capability(event, EIS_DEVICE_CAP_BUTTON) ||
+    if ((state->deviceTypes & 2u) && (eis_event_seat_has_capability(event, EIS_DEVICE_CAP_POINTER) || eis_event_seat_has_capability(event, EIS_DEVICE_CAP_BUTTON) ||
          eis_event_seat_has_capability(event, EIS_DEVICE_CAP_SCROLL)) &&
         !state->pointer)
         state->pointer = addPointer(seat);
-    if (eis_event_seat_has_capability(event, EIS_DEVICE_CAP_POINTER_ABSOLUTE) && !state->absolutePointer)
+    if ((state->deviceTypes & 2u) && eis_event_seat_has_capability(event, EIS_DEVICE_CAP_POINTER_ABSOLUTE) && !state->absolutePointer)
         state->absolutePointer = addAbsolutePointer(seat);
 }
 
@@ -349,6 +360,10 @@ void EisInputBridge::handleInputEvent(eis_event* event) {
     auto* device = eis_event_get_device(event);
     const auto* state = device ? m_seats.value(eis_device_get_seat(device), nullptr) : nullptr;
     if (!state || (device != state->keyboard && device != state->pointer && device != state->absolutePointer))
+        return;
+    const bool keyboardEvent = eis_event_get_type(event) == EIS_EVENT_KEYBOARD_KEY;
+    if (keyboardEvent ? (!(state->deviceTypes & 1u) || device != state->keyboard)
+                      : (!(state->deviceTypes & 2u) || (device != state->pointer && device != state->absolutePointer)))
         return;
     switch (eis_event_get_type(event)) {
     case EIS_EVENT_POINTER_MOTION:
