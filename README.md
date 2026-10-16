@@ -156,7 +156,7 @@ NixOS flake example:
 
 ```nix
 {
-  inputs.hypr-kdeconnect-fix.url = "github:danbulant/hypr-kdeconnect-fix";
+  inputs.hypr-kdeconnect-fix.url = "github:gfhdhytghd/hypr-kdeconnect-fix";
 
   outputs = { nixpkgs, hypr-kdeconnect-fix, ... }: {
     nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {

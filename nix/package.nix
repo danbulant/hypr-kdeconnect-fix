@@ -4,6 +4,7 @@
   cmake,
   pkg-config,
   binutils,
+  dbus,
   qt6,
   wayland,
   wayland-scanner,
@@ -34,6 +35,7 @@ stdenv.mkDerivation (finalAttrs: {
     pkg-config
     wayland-scanner
     binutils
+    dbus
   ];
 
   buildInputs = [
@@ -46,6 +48,12 @@ stdenv.mkDerivation (finalAttrs: {
   cmakeFlags = [
     (lib.cmakeFeature "HKCF_PORTAL_USE_IN" (lib.concatStringsSep ";" portalUseIn))
   ];
+
+  postPatch = ''
+    substituteInPlace CMakeLists.txt \
+      --replace-fail "\''${DBUS_RUN_SESSION_EXECUTABLE} --" \
+        "\''${DBUS_RUN_SESSION_EXECUTABLE} --config-file=${dbus}/share/dbus-1/session.conf --"
+  '';
 
   doCheck = true;
 
